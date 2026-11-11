@@ -1,4 +1,9 @@
 {
+  "buildCommand": "npm run build:web",
+  "outputDirectory": "public",
   "framework": null,
-  "buildCommand": null
+  "rewrites": [
+    { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }
+  ]
 }
+

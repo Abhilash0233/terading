@@ -15,8 +15,9 @@ function remoteConfigured(): boolean {
 }
 
 function requireStore(): void {
-  if (hosted && !remoteConfigured()) {
-    throw new Error("Supabase book store is not configured.");
+  // Hosted without BOOK_URL uses ephemeral /tmp file storage (resets across instances).
+  if (hosted && !remoteConfigured() && !process.env.BOOK_MIRROR_URL) {
+    return;
   }
 }
 
