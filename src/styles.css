@@ -120,6 +120,22 @@ button { cursor: pointer; }
   font-weight: 500;
 }
 .brand span { color: var(--faint); font-size: 11px; letter-spacing: 0.04em; }
+.app-switch {
+  display: flex;
+  margin-left: 8px;
+  border: 1px solid var(--line-strong);
+}
+.app-switch a {
+  color: var(--faint);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 6px 8px;
+}
+.app-switch a + a { border-left: 1px solid var(--line); }
+.app-switch a[aria-current="page"] { background: var(--text); color: #101318; }
 .badges { display: flex; gap: 6px; flex-wrap: wrap; }
 .badge {
   border: 1px solid var(--line-strong);

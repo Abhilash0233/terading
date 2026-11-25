@@ -41,3 +41,22 @@ export function normalizeCandles(rows: RawBar[], interval: IntervalId): Candle[]
   }
   return deduped;
 }
+
+/** Bars the server returns for `?tail=1`. Covers well over one 30 s poll, so a missed poll or two still merges cleanly. */
+export const TAIL_BARS = 12;
+
+/**
+ * Merge the newest bars into a full history. Bars from the tail's first bar onward are replaced
+ * (so a still-forming or revised bar is overwritten), earlier bars are kept as they are.
+ * Returns null when the tail does not reach back to the history (a gap), so the caller must fetch
+ * the full history instead.
+ */
+export function mergeCandles(history: Candle[], tail: Candle[]): Candle[] | null {
+  if (tail.length === 0) return history;
+  if (history.length === 0) return null;
+  const first = tail[0].time;
+  if (first > history[history.length - 1].time) return null;
+  const kept = history.filter((bar) => bar.time < first);
+  if (kept.length === 0) return null;
+  return [...kept, ...tail];
+}

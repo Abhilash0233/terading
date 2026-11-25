@@ -2,7 +2,8 @@ import express from "express";
 import { fetchCandles, fetchQuotes } from "./market.js";
 import { fetchOptionChain } from "./options.js";
 import { bookReadOnly, bookStoreName, readBook, readOptionsBook, writeBook, writeOptionsBook } from "./store.js";
-import type { IntervalId, SymbolId } from "../src/lib/types";
+import { TAIL_BARS } from "../src/lib/candles.js";
+import type { CandleResponse, IntervalId, SymbolId } from "../src/lib/types";
 
 export function createApp(): express.Express {
   const symbols = new Set<SymbolId>(["NIFTY", "BANKNIFTY"]);
@@ -68,16 +69,22 @@ export function createApp(): express.Express {
       res.status(400).json({ ok: false, symbol, interval, error: "Unknown symbol or interval." });
       return;
     }
+    // ?tail=1 returns only the newest bars; the client keeps the full history and merges them in.
+    const tail = req.query.tail === "1";
+    const send = (body: CandleResponse) => {
+      const out = tail && body.ok && body.candles ? { ...body, tail: true, candles: body.candles.slice(-TAIL_BARS) } : body;
+      res.status(body.ok ? 200 : 502).json(out);
+    };
     const key = `${symbol}|${interval}`;
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < TTL_MS) {
-      res.status((hit.body as { ok?: boolean }).ok === false ? 502 : 200).json(hit.body);
+      send(hit.body as CandleResponse);
       return;
     }
     const body = await fetchCandles(symbol, interval);
     cache.set(key, { at: Date.now(), body });
     if (!body.ok) console.error(body.error);
-    res.status(body.ok ? 200 : 502).json(body);
+    send(body);
   });
 
   app.get("/api/quotes", async (_req, res) => {

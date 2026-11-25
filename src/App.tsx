@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChartPane, type ChartLine } from "./components/ChartPane";
 import { OptionsDesk } from "./components/OptionsDesk";
 import { freshBook } from "./lib/book";
+import { mergeCandles } from "./lib/candles";
 import { buildReplay, flattenLive, stepLive, unrealized, type Feed, type ReplayBuild } from "./lib/execution";
 import { formatBarTime, formatClock, inr, inrPlain, px, rMultiple, signedPx } from "./lib/format";
 import { computeIndicators } from "./lib/indicators";
@@ -29,7 +30,13 @@ import {
   type Trade,
 } from "./lib/types";
 
-type ClientFeed = CandleResponse & { stale?: boolean };
+/** `fullAt`: when the full history for this series was last downloaded (ms). */
+type ClientFeed = CandleResponse & { stale?: boolean; fullAt?: number };
+
+/** How often candles are refreshed. Signals only form on closed bars, and fills use each bar's high/low. */
+const FEED_POLL_MS = 30_000;
+/** Re-download the full history this often, to pick up any bar the data source corrected. */
+const FULL_REFRESH_MS = 30 * 60_000;
 type Pack = { candles: Candle[]; ind: BarIndicators[] };
 
 interface Notice {
@@ -117,7 +124,7 @@ export function App() {
     if (!hydrated) return;
     const id = setInterval(() => {
       void pullFeeds(feedsRef.current).then(setFeeds);
-    }, 2000);
+    }, FEED_POLL_MS);
     return () => clearInterval(id);
   }, [hydrated]);
 
@@ -498,6 +505,7 @@ export function App() {
             <strong>TERADING</strong>
             <span>Nifty 50 · Bank Nifty</span>
           </div>
+          <AppSwitch current="index" />
         </div>
         <div className="badges">
           <span className="badge">Paper trading</span>
@@ -933,18 +941,28 @@ function setupFor(id: SymbolId, interval: IntervalId, pack: Pack | null, packed:
 
 async function pullFeeds(prev: Record<string, ClientFeed>): Promise<Record<string, ClientFeed>> {
   const jobs = SYMBOLS.flatMap((item) => INTERVALS.map((interval) => ({ symbol: item.id, interval })));
-  const results = await Promise.all(jobs.map(async (job) => {
+  const load = async (symbol: SymbolId, interval: IntervalId, tail: boolean): Promise<CandleResponse> => {
     try {
-      const response = await fetch(`/api/candles?symbol=${job.symbol}&interval=${job.interval}`);
+      const response = await fetch(`/api/candles?symbol=${symbol}&interval=${interval}${tail ? "&tail=1" : ""}`);
       return (await response.json()) as CandleResponse;
     } catch (error) {
-      return {
-        ok: false,
-        symbol: job.symbol,
-        interval: job.interval,
-        error: error instanceof Error ? error.message : "Network error",
-      } satisfies CandleResponse;
+      return { ok: false, symbol, interval, error: error instanceof Error ? error.message : "Network error" };
     }
+  };
+  const nowMs = Date.now();
+  const results = await Promise.all(jobs.map(async (job): Promise<ClientFeed> => {
+    const have = prev[`${job.symbol}|${job.interval}`];
+    const history = have?.candles ?? [];
+    const fullDue = history.length === 0 || have?.fullAt == null || nowMs - have.fullAt >= FULL_REFRESH_MS;
+    if (!fullDue) {
+      const body = await load(job.symbol, job.interval, true);
+      if (!body.ok) return { ...body };
+      const merged = mergeCandles(history, body.candles ?? []);
+      // A gap (e.g. the computer slept) means the tail no longer overlaps: fall through to a full download.
+      if (merged) return { ...body, tail: false, candles: merged, fullAt: have?.fullAt };
+    }
+    const body = await load(job.symbol, job.interval, false);
+    return body.ok ? { ...body, fullAt: nowMs } : { ...body };
   }));
   const next = { ...prev };
   for (const body of results) {
@@ -964,6 +982,21 @@ async function pullQuotes(): Promise<Partial<Record<SymbolId, QuoteTick>>> {
   } catch {
     return {};
   }
+}
+
+function appHref(port: number): string {
+  if (typeof window === "undefined") return `http://127.0.0.1:${port}/`;
+  const host = window.location.hostname || "127.0.0.1";
+  return `${window.location.protocol}//${host}:${port}/`;
+}
+
+function AppSwitch({ current }: { current: "index" | "commodities" }) {
+  return (
+    <nav className="app-switch" aria-label="Switch application">
+      <a href={appHref(5173)} aria-current={current === "index" ? "page" : undefined}>Terading</a>
+      <a href={appHref(5174)} aria-current={current === "commodities" ? "page" : undefined}>Comtrading</a>
+    </nav>
+  );
 }
 
 function toFeeds(feeds: Record<string, ClientFeed>): Feed[] {

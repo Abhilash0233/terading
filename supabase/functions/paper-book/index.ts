@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 const EXPECTED_SHA256 = new Set([
-  "3b83e05af669f2730b1495766d2a5891bcd8368650755f9d35a8911308a7f72e",
+  "df5591e22ddc1a1b762098c0f081b45583c6cff2ece1cf83f0b134e703b6ea90",
 ]);
 const ALLOWED_IDS = new Set(["live", "options"]);
 

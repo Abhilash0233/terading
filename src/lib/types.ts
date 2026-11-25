@@ -170,6 +170,8 @@ export interface CandleResponse {
   sourceDetail?: string;
   warning?: string;
   candles?: Candle[];
+  /** True when `candles` holds only the newest bars (`?tail=1`), to be merged into a full history. */
+  tail?: boolean;
   error?: string;
   fetchedAt?: number;
 }

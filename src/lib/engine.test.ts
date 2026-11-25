@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { freshBook } from "./book";
-import { normalizeCandles } from "./candles";
+import { mergeCandles, normalizeCandles, TAIL_BARS } from "./candles";
 import { emptySlice, firstRoundTripIndex, pendingFromSetup, reduceBar, runReplay, stepLive } from "./execution";
 import { atrSeries, computeIndicators, emaSeries, rsiSeries } from "./indicators";
 import { evaluateSetupAt, trendBias } from "./strategy";
@@ -70,6 +70,48 @@ function withReclaimBar(closes: number[], side: "long" | "short"): Candle[] {
   }
   return bars;
 }
+
+test("tail merge replaces the overlapping bars and appends new ones", () => {
+  const full = path(START, 300, oscillation(40, 23000));
+  const history = full.slice(0, 35).map((bar) => ({ ...bar }));
+  history[34] = { ...history[34], high: history[34].high - 2, close: history[34].close - 1 }; // was still forming
+  const tail = full.slice(-TAIL_BARS);
+  assert.deepEqual(mergeCandles(history, tail), full);
+  assert.deepEqual(mergeCandles(full, []), full);
+});
+
+test("tail merge refuses a gap so the caller re-downloads the full history", () => {
+  const full = path(START, 300, oscillation(60, 23000));
+  assert.equal(mergeCandles(full.slice(0, 20), full.slice(-TAIL_BARS)), null);
+  assert.equal(mergeCandles([], full.slice(-TAIL_BARS)), null);
+  assert.equal(mergeCandles(full.slice(-5), full.slice(-TAIL_BARS)), null);
+});
+
+test("merged history gives the same indicators and live trades as a full download", () => {
+  const exec = withReclaimBar(uptrend(80), "long");
+  const htf = path(START - 900 * 30, 900, uptrend(40));
+  const extra = path(exec[exec.length - 1].time + 300, 300, uptrend(6).map((v, i) => exec[exec.length - 1].close + 4 + i * 6));
+  const full = [...exec, ...extra];
+  let book = freshBook();
+  let merged = full.slice(0, exec.length);
+  let fullBook = freshBook();
+  for (let n = exec.length; n <= full.length; n++) {
+    const fresh = full.slice(0, n);
+    const next = mergeCandles(merged, fresh.slice(-TAIL_BARS));
+    assert.ok(next);
+    merged = next;
+    assert.deepEqual(merged, fresh);
+    assert.deepEqual(computeIndicators(merged), computeIndicators(fresh));
+    const nowSec = fresh[fresh.length - 1].time + 300;
+    const feeds = (candles: Candle[]) => [
+      { symbol: "NIFTY" as const, interval: "5m" as const, candles },
+      { symbol: "NIFTY" as const, interval: "15m" as const, candles: htf },
+    ];
+    book = stepLive(book, feeds(merged), "5m", nowSec);
+    fullBook = stepLive(fullBook, feeds(fresh), "5m", nowSec);
+    assert.deepEqual(book, fullBook);
+  }
+});
 
 test("IST session boundaries and weekday close", () => {
   assert.equal(sessionState(new Date(unixFromIst(2026, 10, 21, 9, 14) * 1000)).open, false);
