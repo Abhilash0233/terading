@@ -3,7 +3,8 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 const EXPECTED_SHA256 = new Set([
   "df5591e22ddc1a1b762098c0f081b45583c6cff2ece1cf83f0b134e703b6ea90",
 ]);
-const ALLOWED_IDS = new Set(["live", "options"]);
+// "live" and "options": Terading. "commodities": Comtrading.
+const ALLOWED_IDS = new Set(["live", "options", "commodities"]);
 
 function adminClient(): SupabaseClient | null {
   const url = Deno.env.get("SUPABASE_URL");
@@ -49,7 +50,7 @@ function bookId(req: Request): string | null {
 }
 
 Deno.serve(async (req: Request) => {
-  const presented = await sha256Hex(req.headers.get("x-terading-secret") ?? "");
+  const presented = await sha256Hex(req.headers.get("x-terading-secret") ?? req.headers.get("x-comtrading-secret") ?? "");
   const accepted = [...EXPECTED_SHA256].some((expected) => sameHash(presented, expected));
   if (!accepted) {
     return Response.json({ ok: false }, { status: 401 });
