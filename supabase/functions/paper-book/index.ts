@@ -4,7 +4,8 @@ const EXPECTED_SHA256 = new Set([
   "df5591e22ddc1a1b762098c0f081b45583c6cff2ece1cf83f0b134e703b6ea90",
 ]);
 // "live" and "options": Terading. "commodities": Comtrading. "push": phones subscribed to trade alerts.
-const ALLOWED_IDS = new Set(["live", "options", "commodities", "push"]);
+// "arena": the bot competition.
+const ALLOWED_IDS = new Set(["live", "options", "commodities", "push", "arena"]);
 
 function adminClient(): SupabaseClient | null {
   const url = Deno.env.get("SUPABASE_URL");

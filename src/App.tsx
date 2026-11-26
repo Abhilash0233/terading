@@ -1080,6 +1080,7 @@ function AppSwitch({ current }: { current: "index" | "commodities" }) {
     <nav className="app-switch" aria-label="Switch application">
       <a href={appHref("index")} aria-current={current === "index" ? "page" : undefined}>Terading</a>
       <a href={appHref("commodities")} aria-current={current === "commodities" ? "page" : undefined}>Comtrading</a>
+      {import.meta.env.DEV ? null : <a href="/arena/">Arena</a>}
     </nav>
   );
 }
