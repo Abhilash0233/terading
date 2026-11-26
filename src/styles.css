@@ -576,3 +576,8 @@ button.badge.sound-toggle.off {
   cursor: pointer;
 }
 .trade-banner-close:hover, .trade-banner-close:focus-visible { color: var(--text); border-color: var(--line-strong); }
+
+/* Phone alerts control in the header. */
+.phone-alerts { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.phone-alerts button.badge { cursor: pointer; }
+.phone-alerts-note { font-size: 12px; color: var(--muted); }

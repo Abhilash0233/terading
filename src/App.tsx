@@ -6,6 +6,7 @@ import { mergeCandles } from "./lib/candles";
 import { buildReplay, flattenLive, stepLive, unrealized, type Feed, type ReplayBuild } from "./lib/execution";
 import { formatBarTime, formatClock, inr, inrPlain, px, rMultiple, signedPx } from "./lib/format";
 import { computeIndicators } from "./lib/indicators";
+import { PhoneAlerts } from "./components/PhoneAlerts";
 import { TradeBanners, useTradeBanners, type TradeBanner } from "./components/TradeBanners";
 import { announce, armSound, isSoundEnabled, playTradeSound, setSoundEnabled, soundForClose, spokenInterval, type TradeSound } from "./lib/sounds";
 import { evaluateSetupAt, sentimentAt } from "./lib/strategy";
@@ -76,6 +77,8 @@ export function App() {
   const [tfDrops, setTfDrops] = useState<Partial<Record<SymbolId, string>>>({});
   const [hydrated, setHydrated] = useState(false);
   const [readOnly, setReadOnly] = useState(false);
+  /** True when the hosted server runs the bot (BOT_ENGINE=server): this page then only displays the saved book and sends control changes. */
+  const [serverEngine, setServerEngine] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [cursorTime, setCursorTime] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -85,6 +88,8 @@ export function App() {
   const [soundOn, setSoundOn] = useState(() => isSoundEnabled());
   const [blotterRange, setBlotterRange] = useState<BlotterRange>("today");
   const saved = useRef("");
+  const savedSettings = useRef("");
+  const settingsSentAt = useRef(0);
   const seenEvents = useRef<Set<string> | null>(null);
   const feedsRef = useRef(feeds);
   const bookRef = useRef(book);
@@ -116,8 +121,10 @@ export function App() {
       if (cancel) return;
       const loaded = bookResult as Book;
       saved.current = JSON.stringify(loaded);
+      savedSettings.current = settingsOf(loaded);
       setBook(loaded);
       setReadOnly(health?.readOnly === true);
+      setServerEngine(health?.engine === "server");
       setFeeds(nextFeeds);
       setQuotes(nextQuotes);
       setHydrated(true);
@@ -174,31 +181,41 @@ export function App() {
   const liveClockSec = Math.floor(now.getTime() / 1000);
 
   useEffect(() => {
-    if (!hydrated || readOnly) return;
+    if (!hydrated || readOnly || serverEngine) return;
     const list = toFeeds(feeds);
     if (list.length === 0) return;
     setBook((current) => {
       const next = stepLive(current, list, current.ui.interval, Date.now() / 1000);
       return JSON.stringify(next) === JSON.stringify(current) ? current : next;
     });
-  }, [hydrated, readOnly, feedStamp, feeds, book.ui.interval, book.auto, book.lots.NIFTY, book.lots.BANKNIFTY, liveClockSec]);
+  }, [hydrated, readOnly, serverEngine, feedStamp, feeds, book.ui.interval, book.auto, book.lots.NIFTY, book.lots.BANKNIFTY, liveClockSec]);
 
   useEffect(() => {
-    if (!hydrated || !readOnly) return;
+    if (!hydrated || !(readOnly || serverEngine)) return;
     const id = setInterval(() => {
       void fetch(API + "book")
         .then((res) => (res.ok ? res.json() : null))
         .then((remote: Book | null) => {
           if (!remote?.symbols) return;
           setBook((current) => {
-            const next = { ...remote, ui: current.ui };
+            if (!serverEngine) {
+              const next = { ...remote, ui: current.ui };
+              return JSON.stringify(next) === JSON.stringify(current) ? current : next;
+            }
+            // Server bot: take its trades and orders. Keep this page's own view (mode, chart symbol,
+            // replay). Right after a control change, keep the local settings until the server has them.
+            const settled = Date.now() - settingsSentAt.current > 6000;
+            const next: Book = settled
+              ? { ...remote, ui: { ...current.ui, interval: remote.ui.interval } }
+              : { ...remote, auto: current.auto, lots: current.lots, ui: current.ui };
+            if (settled) savedSettings.current = settingsOf(next);
             return JSON.stringify(next) === JSON.stringify(current) ? current : next;
           });
         })
         .catch(() => {});
     }, 3000);
     return () => clearInterval(id);
-  }, [hydrated, readOnly]);
+  }, [hydrated, readOnly, serverEngine]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -285,6 +302,21 @@ export function App() {
 
   useEffect(() => {
     if (!hydrated || readOnly) return;
+    if (serverEngine) {
+      // The server bot owns the book; send only Auto, lot sizes and the trading timeframe.
+      const settings = settingsOf(book);
+      if (settings === savedSettings.current) return;
+      const handle = setTimeout(() => {
+        savedSettings.current = settings;
+        settingsSentAt.current = Date.now();
+        void fetch(API + "book-settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: settings,
+        });
+      }, 300);
+      return () => clearTimeout(handle);
+    }
     const serial = JSON.stringify(book);
     if (serial === saved.current) return;
     const handle = setTimeout(() => {
@@ -296,7 +328,7 @@ export function App() {
       });
     }, 400);
     return () => clearTimeout(handle);
-  }, [book, hydrated, readOnly]);
+  }, [book, hydrated, readOnly, serverEngine]);
 
   const packed = useMemo(() => {
     const map = new Map<string, Pack>();
@@ -457,6 +489,14 @@ export function App() {
       const price = priceOf(id);
       if (price == null) return;
       setBook((current) => flattenLive(current, id, price, Date.now() / 1000));
+      if (serverEngine) {
+        settingsSentAt.current = Date.now();
+        void fetch(API + "book-flatten", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbol: id, price }),
+        });
+      }
       return;
     }
     if (cursorTime == null) return;
@@ -547,6 +587,7 @@ export function App() {
           <span className="badge">Not advice</span>
           <span className="badge">Quotes may be delayed</span>
           {readOnly ? <span className="badge" data-testid="mirror-badge">Mirror · read-only</span> : null}
+          {serverEngine && !readOnly ? <span className="badge" title="The bot runs on the server every minute in market hours, even with this page closed.">Bot on server</span> : null}
           <button
             type="button"
             className={`badge sound-toggle ${soundOn ? "on" : "off"}`}
@@ -561,6 +602,7 @@ export function App() {
           >
             {soundOn ? "Sound on" : "Sound off"}
           </button>
+          {serverEngine && !readOnly ? <PhoneAlerts /> : null}
         </div>
         <div className="clock">
           <time dateTime={now.toISOString()}>{formatClock(now)}</time>
@@ -1021,6 +1063,11 @@ async function pullQuotes(): Promise<Partial<Record<SymbolId, QuoteTick>>> {
 }
 
 /** Dev servers use separate ports; the hosted build serves both apps from one site. */
+/** The settings a page may change while the server runs the bot. */
+function settingsOf(book: Book): string {
+  return JSON.stringify({ auto: book.auto, lots: book.lots, interval: book.ui.interval });
+}
+
 function appHref(app: "index" | "commodities"): string {
   if (import.meta.env.DEV) return `${window.location.protocol}//${window.location.hostname}:${app === "index" ? 5173 : 5174}/`;
   const base = import.meta.env.BASE_URL;

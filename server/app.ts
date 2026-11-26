@@ -1,4 +1,6 @@
 import express from "express";
+import { flattenLive } from "../src/lib/execution.js";
+import { changeExecutionInterval } from "../src/lib/watch.js";
 import { fetchCandles, fetchQuotes } from "./market.js";
 import { fetchOptionChain } from "./options.js";
 import { bookReadOnly, bookStoreName, readBook, readOptionsBook, writeBook, writeOptionsBook } from "./store.js";
@@ -18,7 +20,56 @@ export function createApp(): express.Express {
   app.use("/api", express.json({ limit: "4mb" }));
 
   app.get("/api/health", (_req, res) => {
-    res.json({ ok: true, store: bookStoreName(), readOnly: bookReadOnly() });
+    res.json({ ok: true, store: bookStoreName(), readOnly: bookReadOnly(), engine: process.env.BOT_ENGINE === "server" ? "server" : "browser" });
+  });
+
+  // Background bot controls. The page sends only these changes; the server applies them to the
+  // latest saved book, so the bot's own updates are never overwritten by a whole-book save.
+  app.post("/api/book-settings", async (req, res) => {
+    if (bookReadOnly()) {
+      res.status(403).json({ ok: false, error: "Book is read-only on this server." });
+      return;
+    }
+    try {
+      const body = (req.body ?? {}) as { auto?: unknown; lots?: Record<string, unknown>; interval?: unknown };
+      let book = await readBook();
+      if (typeof body.auto === "boolean") book = { ...book, auto: body.auto };
+      if (body.lots && typeof body.lots === "object") {
+        const lots = { ...book.lots };
+        for (const id of symbols) {
+          const value = Math.round(Number(body.lots[id]));
+          if (Number.isFinite(value) && value >= 1 && value <= 100000) lots[id] = value;
+        }
+        book = { ...book, lots };
+      }
+      if (typeof body.interval === "string" && intervals.has(body.interval as IntervalId)) {
+        book = changeExecutionInterval(book, body.interval as IntervalId).book;
+      }
+      res.json(await writeBook(book));
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : "settings failed");
+      res.status(503).json({ ok: false, error: "Book store unavailable." });
+    }
+  });
+
+  app.post("/api/book-flatten", async (req, res) => {
+    if (bookReadOnly()) {
+      res.status(403).json({ ok: false, error: "Book is read-only on this server." });
+      return;
+    }
+    const body = (req.body ?? {}) as { symbol?: unknown; price?: unknown };
+    const symbol = String(body.symbol ?? "") as SymbolId;
+    const price = Number(body.price);
+    if (!symbols.has(symbol) || !Number.isFinite(price) || price <= 0) {
+      res.status(400).json({ ok: false, error: "Unknown symbol or price." });
+      return;
+    }
+    try {
+      res.json(await writeBook(flattenLive(await readBook(), symbol, price, Date.now() / 1000)));
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : "flatten failed");
+      res.status(503).json({ ok: false, error: "Book store unavailable." });
+    }
   });
 
   app.put(["/api/book", "/api/options-book"], (_req, res, next) => {

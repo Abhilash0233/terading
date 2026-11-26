@@ -260,3 +260,29 @@ export async function fetchQuotes(): Promise<QuotesResponse> {
   }
   return { ok: true, quotes, fetchedAt: Date.now(), error: errors.length ? errors.join(" ") : undefined };
 }
+
+/**
+ * Shorter history for the background bot's minute ticks. A few hundred bars per series is enough for
+ * EMA 9/21, RSI 14 and ATR 14 to settle, and keeps each tick light. Yahoo only; throws on failure.
+ */
+const TICK_RANGE: Record<IntervalId, string> = { "5m": "5d", "15m": "1mo", "1h": "3mo" };
+
+export async function fetchTickCandles(symbol: SymbolId, interval: IntervalId): Promise<Candle[]> {
+  if (Date.now() < yahooBlockedUntil) throw new Error("Yahoo paused after a rate limit");
+  const symbolMeta = meta(symbol);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbolMeta.yahoo)}?interval=${YAHOO[interval].interval}&range=${TICK_RANGE[interval]}&includePrePost=false`;
+  return enqueueYahoo(async () => {
+    const response = await fetch(url, {
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (response.status === 429) {
+      yahooBlockedUntil = Date.now() + 60_000;
+      throw new Error("HTTP 429");
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const candles = parseYahoo(await response.json(), interval);
+    if (candles.length < 30) throw new Error("empty chart");
+    return candles;
+  });
+}
