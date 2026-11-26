@@ -495,3 +495,84 @@ button.badge.sound-toggle.off {
   .options-head { flex-direction: column; align-items: flex-start; }
   .account-inline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Trade alerts that stay until closed. */
+.trade-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--sunken);
+}
+.trade-banners-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.trade-banners-head button {
+  background: none;
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  font: inherit;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.trade-banner {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 20px;
+  padding: 10px 44px 10px 14px;
+  background: var(--raise);
+  border: 1px solid var(--line-strong);
+  border-left: 4px solid var(--blue);
+}
+.trade-banner > strong {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  min-width: 260px;
+}
+.trade-banner.open { border-left-color: var(--green); }
+.trade-banner.open > strong { color: var(--green); }
+.trade-banner.close.profit { border-left-color: var(--green); }
+.trade-banner.close.loss { border-left-color: var(--red); }
+.trade-banner.close > strong { color: var(--amber); }
+.trade-banner dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 0;
+}
+.trade-banner dl div { display: flex; flex-direction: column; }
+.trade-banner dt {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.trade-banner dd { margin: 0; font-family: var(--mono); font-size: 13px; }
+.trade-banner.close.profit div:last-child dd { color: var(--green); }
+.trade-banner.close.loss div:last-child dd { color: var(--red); }
+.trade-banner-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.trade-banner-close:hover, .trade-banner-close:focus-visible { color: var(--text); border-color: var(--line-strong); }

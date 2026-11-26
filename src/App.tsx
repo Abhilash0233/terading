@@ -6,6 +6,7 @@ import { mergeCandles } from "./lib/candles";
 import { buildReplay, flattenLive, stepLive, unrealized, type Feed, type ReplayBuild } from "./lib/execution";
 import { formatBarTime, formatClock, inr, inrPlain, px, rMultiple, signedPx } from "./lib/format";
 import { computeIndicators } from "./lib/indicators";
+import { TradeBanners, useTradeBanners, type TradeBanner } from "./components/TradeBanners";
 import { armSound, isSoundEnabled, playTradeSound, setSoundEnabled, soundForClose, type TradeSound } from "./lib/sounds";
 import { evaluateSetupAt, sentimentAt } from "./lib/strategy";
 import { changeExecutionInterval, describeWatch } from "./lib/watch";
@@ -30,6 +31,8 @@ import {
   type Trade,
 } from "./lib/types";
 
+const API = `${import.meta.env.BASE_URL}api/`;
+
 /** `fullAt`: when the full history for this series was last downloaded (ms). */
 type ClientFeed = CandleResponse & { stale?: boolean; fullAt?: number };
 
@@ -45,6 +48,7 @@ interface Notice {
   sound: TradeSound;
   title: string;
   body: string;
+  banner: TradeBanner;
 }
 
 const EMPTY_SETUP: Setup = {
@@ -75,6 +79,7 @@ export function App() {
   const [playing, setPlaying] = useState(false);
   const [replayNote, setReplayNote] = useState("");
   const [notices, setNotices] = useState<Notice[]>([]);
+  const tradeBanners = useTradeBanners("terading.tradeBanners");
   const [soundOn, setSoundOn] = useState(() => isSoundEnabled());
   const [blotterRange, setBlotterRange] = useState<BlotterRange>("today");
   const saved = useRef("");
@@ -101,8 +106,8 @@ export function App() {
     let cancel = false;
     void (async () => {
       const [bookResult, health, nextFeeds, nextQuotes] = await Promise.all([
-        fetch("/api/book").then((res) => res.json()).catch(() => freshBook()),
-        fetch("/api/health").then((res) => res.json()).catch(() => null),
+        fetch(API + "book").then((res) => res.json()).catch(() => freshBook()),
+        fetch(API + "health").then((res) => res.json()).catch(() => null),
         pullFeeds({}),
         pullQuotes(),
       ]);
@@ -179,7 +184,7 @@ export function App() {
   useEffect(() => {
     if (!hydrated || !readOnly) return;
     const id = setInterval(() => {
-      void fetch("/api/book")
+      void fetch(API + "book")
         .then((res) => (res.ok ? res.json() : null))
         .then((remote: Book | null) => {
           if (!remote?.symbols) return;
@@ -210,6 +215,17 @@ export function App() {
             sound: "open",
             title: `${name} ${position.interval} ${position.direction.toUpperCase()} opened`,
             body: `Filled at ${px(position.entry)}. Stop ${px(position.stop)}. Target ${px(position.target)}.`,
+            banner: {
+              id: key,
+              kind: "open",
+              title: `${name} ${position.interval} ${position.direction.toUpperCase()} opened`,
+              facts: [
+                { label: "Entry", value: px(position.entry) },
+                { label: "Entry time", value: formatBarTime(position.openedAt) },
+                { label: "Stop", value: px(position.stop) },
+                { label: "Target", value: px(position.target) },
+              ],
+            },
           });
         }
       }
@@ -227,12 +243,26 @@ export function App() {
           sound: soundForClose(trade.reason, trade.pnl),
           title: `${name} ${trade.interval} ${trade.direction.toUpperCase()} closed · ${why}`,
           body: `Exit ${px(trade.exit)} from ${px(trade.entry)}. ${signedPx(trade.points)} pts, ${inr(trade.pnl)}.`,
+          banner: {
+            id: key,
+            kind: "close",
+            outcome: trade.pnl >= 0 ? "profit" : "loss",
+            title: `${name} ${trade.interval} ${trade.direction.toUpperCase()} closed · ${why}`,
+            facts: [
+              { label: "Entry", value: px(trade.entry) },
+              { label: "Entry time", value: formatBarTime(trade.openedAt) },
+              { label: "Exit", value: px(trade.exit) },
+              { label: "Closed time", value: formatBarTime(trade.closedAt) },
+              { label: "P&L", value: `${signedPx(trade.points)} pts · ${inr(trade.pnl)}` },
+            ],
+          },
         });
       }
     }
     if (seenEvents.current && mode === "live" && events.length > 0) {
       setNotices((current) => [...events, ...current].slice(0, 4));
       for (const event of events) playTradeSound(event.sound);
+      tradeBanners.add(events.map((event) => event.banner));
       const headline = events.map((event) => event.title).join(" · ");
       const priorTitle = document.title;
       document.title = headline;
@@ -254,7 +284,7 @@ export function App() {
     if (serial === saved.current) return;
     const handle = setTimeout(() => {
       saved.current = serial;
-      void fetch("/api/book", {
+      void fetch(API + "book", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: serial,
@@ -537,6 +567,7 @@ export function App() {
           <button type="button" className="replay-on" aria-pressed={mode === "replay"} data-testid="mode-replay" onClick={() => setMode("replay")}>Replay</button>
         </div>
       </header>
+      <TradeBanners banners={tradeBanners.banners} onClose={tradeBanners.close} onCloseAll={tradeBanners.closeAll} />
 
       <section className="watch" data-testid="watch" aria-label="Order status">
         {watches.map((row) => (
@@ -943,7 +974,7 @@ async function pullFeeds(prev: Record<string, ClientFeed>): Promise<Record<strin
   const jobs = SYMBOLS.flatMap((item) => INTERVALS.map((interval) => ({ symbol: item.id, interval })));
   const load = async (symbol: SymbolId, interval: IntervalId, tail: boolean): Promise<CandleResponse> => {
     try {
-      const response = await fetch(`/api/candles?symbol=${symbol}&interval=${interval}${tail ? "&tail=1" : ""}`);
+      const response = await fetch(`${API}candles?symbol=${symbol}&interval=${interval}${tail ? "&tail=1" : ""}`);
       return (await response.json()) as CandleResponse;
     } catch (error) {
       return { ok: false, symbol, interval, error: error instanceof Error ? error.message : "Network error" };
@@ -975,7 +1006,7 @@ async function pullFeeds(prev: Record<string, ClientFeed>): Promise<Record<strin
 
 async function pullQuotes(): Promise<Partial<Record<SymbolId, QuoteTick>>> {
   try {
-    const response = await fetch("/api/quotes");
+    const response = await fetch(API + "quotes");
     const body = await response.json() as { ok?: boolean; quotes?: Partial<Record<SymbolId, QuoteTick>> };
     if (!body.ok || !body.quotes) return {};
     return body.quotes;
@@ -984,17 +1015,19 @@ async function pullQuotes(): Promise<Partial<Record<SymbolId, QuoteTick>>> {
   }
 }
 
-function appHref(port: number): string {
-  if (typeof window === "undefined") return `http://127.0.0.1:${port}/`;
-  const host = window.location.hostname || "127.0.0.1";
-  return `${window.location.protocol}//${host}:${port}/`;
+/** Dev servers use separate ports; the hosted build serves both apps from one site. */
+function appHref(app: "index" | "commodities"): string {
+  if (import.meta.env.DEV) return `${window.location.protocol}//${window.location.hostname}:${app === "index" ? 5173 : 5174}/`;
+  const base = import.meta.env.BASE_URL;
+  if (app === "index") return base;
+  return base === "/" ? "https://mcx-trades.vercel.app/" : "/";
 }
 
 function AppSwitch({ current }: { current: "index" | "commodities" }) {
   return (
     <nav className="app-switch" aria-label="Switch application">
-      <a href={appHref(5173)} aria-current={current === "index" ? "page" : undefined}>Terading</a>
-      <a href={appHref(5174)} aria-current={current === "commodities" ? "page" : undefined}>Comtrading</a>
+      <a href={appHref("index")} aria-current={current === "index" ? "page" : undefined}>Terading</a>
+      <a href={appHref("commodities")} aria-current={current === "commodities" ? "page" : undefined}>Comtrading</a>
     </nav>
   );
 }

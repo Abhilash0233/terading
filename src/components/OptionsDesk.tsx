@@ -10,6 +10,8 @@ import { playTradeSound, soundForClose, type TradeSound } from "../lib/sounds";
 import type { IntervalId, Setup, SymbolId } from "../lib/types";
 import { SYMBOLS } from "../lib/types";
 
+const API = `${import.meta.env.BASE_URL}api/`;
+
 interface Notice {
   id: string;
   kind: "open" | "close";
@@ -48,7 +50,7 @@ export function OptionsDesk(props: Props) {
 
   useEffect(() => {
     let cancel = false;
-    void fetch("/api/options-book")
+    void fetch(API + "options-book")
       .then((res) => res.json())
       .then((body) => {
         if (cancel) return;
@@ -71,7 +73,7 @@ export function OptionsDesk(props: Props) {
     const pull = () => {
       void Promise.all(SYMBOLS.map(async (item) => {
         try {
-          const res = await fetch(`/api/option-chain?symbol=${item.id}`);
+          const res = await fetch(`${API}option-chain?symbol=${item.id}`);
           return (await res.json()) as OptionChainResponse;
         } catch {
           return { ok: false, symbol: item.id, error: "Network error", fetchedAt: Date.now() } satisfies OptionChainResponse;
@@ -115,7 +117,7 @@ export function OptionsDesk(props: Props) {
   useEffect(() => {
     if (!hydrated || !props.readOnly) return;
     const id = window.setInterval(() => {
-      void fetch("/api/options-book")
+      void fetch(API + "options-book")
         .then((res) => (res.ok ? res.json() : null))
         .then((remote: OptionsBook | null) => {
           if (remote?.cash == null) return;
@@ -158,7 +160,7 @@ export function OptionsDesk(props: Props) {
     if (serial === saved.current) return;
     const handle = window.setTimeout(() => {
       saved.current = serial;
-      void fetch("/api/options-book", {
+      void fetch(API + "options-book", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: serial,
