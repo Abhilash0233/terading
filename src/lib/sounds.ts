@@ -68,7 +68,10 @@ export function setSoundEnabled(on: boolean): void {
   } catch {
     /* ignore quota / private mode */
   }
-  if (!on) queued = [];
+  if (!on) {
+    queued = [];
+    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+  }
 }
 
 /** Unlock playback (browser gesture) and optionally play the open clip as a test. */
@@ -77,7 +80,10 @@ export function armSound(playTest = false): void {
     const audio = template(kind);
     audio.load();
   }
-  if (playTest && enabled) playOne("open");
+  if (playTest && enabled) {
+    playOne("open");
+    announce("Trade alerts on");
+  }
 }
 
 export function playTradeSound(kind: TradeSound): void {
@@ -89,6 +95,40 @@ export function playTradeSound(kind: TradeSound): void {
     arming = false;
     pump();
   });
+}
+
+const SPOKEN_INTERVAL: Record<string, string> = { "5m": "5 minute", "15m": "15 minute", "1h": "1 hour" };
+
+/** Interval as it should be read aloud, e.g. "5m" → "5 minute". */
+export function spokenInterval(interval: string): string {
+  return SPOKEN_INTERVAL[interval] ?? interval;
+}
+
+let voice: SpeechSynthesisVoice | null | undefined;
+
+function pickVoice(): SpeechSynthesisVoice | null {
+  if (voice !== undefined) return voice;
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) return null; // not loaded yet; try again next time
+  voice = voices.find((v) => v.lang === "en-IN") ?? voices.find((v) => v.lang.startsWith("en")) ?? null;
+  return voice;
+}
+
+/**
+ * Read a trade alert aloud after its chime, so the listener knows which instrument traded.
+ * Follows the Sound on/off switch. Browsers queue utterances, so several alerts play one after another.
+ */
+export function announce(text: string, delayMs = 900): void {
+  if (!enabled || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  window.setTimeout(() => {
+    if (!enabled) return;
+    const utterance = new SpeechSynthesisUtterance(text);
+    const chosen = pickVoice();
+    if (chosen) utterance.voice = chosen;
+    utterance.lang = chosen?.lang ?? "en-IN";
+    utterance.rate = 0.95;
+    window.speechSynthesis.speak(utterance);
+  }, delayMs);
 }
 
 export function soundForClose(reason: string, pnl: number): "profit" | "loss" {

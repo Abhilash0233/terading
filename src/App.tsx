@@ -7,7 +7,7 @@ import { buildReplay, flattenLive, stepLive, unrealized, type Feed, type ReplayB
 import { formatBarTime, formatClock, inr, inrPlain, px, rMultiple, signedPx } from "./lib/format";
 import { computeIndicators } from "./lib/indicators";
 import { TradeBanners, useTradeBanners, type TradeBanner } from "./components/TradeBanners";
-import { armSound, isSoundEnabled, playTradeSound, setSoundEnabled, soundForClose, type TradeSound } from "./lib/sounds";
+import { announce, armSound, isSoundEnabled, playTradeSound, setSoundEnabled, soundForClose, spokenInterval, type TradeSound } from "./lib/sounds";
 import { evaluateSetupAt, sentimentAt } from "./lib/strategy";
 import { changeExecutionInterval, describeWatch } from "./lib/watch";
 import { higherInterval, istDateKey, sessionState, splitCandles, tradeInBlotterRange, type BlotterRange } from "./lib/time";
@@ -48,6 +48,8 @@ interface Notice {
   sound: TradeSound;
   title: string;
   body: string;
+  /** Read aloud after the chime, naming the instrument. */
+  spoken: string;
   banner: TradeBanner;
 }
 
@@ -215,6 +217,7 @@ export function App() {
             sound: "open",
             title: `${name} ${position.interval} ${position.direction.toUpperCase()} opened`,
             body: `Filled at ${px(position.entry)}. Stop ${px(position.stop)}. Target ${px(position.target)}.`,
+            spoken: `${name}, ${spokenInterval(position.interval)}, ${position.direction} opened.`,
             banner: {
               id: key,
               kind: "open",
@@ -243,6 +246,7 @@ export function App() {
           sound: soundForClose(trade.reason, trade.pnl),
           title: `${name} ${trade.interval} ${trade.direction.toUpperCase()} closed · ${why}`,
           body: `Exit ${px(trade.exit)} from ${px(trade.entry)}. ${signedPx(trade.points)} pts, ${inr(trade.pnl)}.`,
+          spoken: `${name}, ${spokenInterval(trade.interval)}, ${trade.direction} closed at ${why === "stop" ? "stop loss" : why === "target" ? "target" : "manual exit"}, ${trade.pnl >= 0 ? "profit" : "loss"}.`,
           banner: {
             id: key,
             kind: "close",
@@ -262,6 +266,7 @@ export function App() {
     if (seenEvents.current && mode === "live" && events.length > 0) {
       setNotices((current) => [...events, ...current].slice(0, 4));
       for (const event of events) playTradeSound(event.sound);
+      for (const event of events) announce(event.spoken);
       tradeBanners.add(events.map((event) => event.banner));
       const headline = events.map((event) => event.title).join(" · ");
       const priorTitle = document.title;

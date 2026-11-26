@@ -6,7 +6,7 @@ import { flattenOption, optionUnrealized, stepOptions, type OptionFeed } from ".
 import { markOption } from "../lib/options/pricing";
 import type { OptionChainResponse, OptionsBook, OptionTrade } from "../lib/options/types";
 import { describeOptionWatch } from "../lib/options/watch";
-import { playTradeSound, soundForClose, type TradeSound } from "../lib/sounds";
+import { announce, playTradeSound, soundForClose, type TradeSound } from "../lib/sounds";
 import type { IntervalId, Setup, SymbolId } from "../lib/types";
 import { SYMBOLS } from "../lib/types";
 
@@ -18,6 +18,8 @@ interface Notice {
   sound: TradeSound;
   title: string;
   body: string;
+  /** Read aloud after the chime, naming the instrument. */
+  spoken: string;
 }
 
 interface Props {
@@ -184,6 +186,7 @@ export function OptionsDesk(props: Props) {
             kind: "open",
             sound: "open",
             title: `${item.name} ${position.right} ${px(position.strike)} bought`,
+            spoken: `${item.id === "NIFTY" ? "Nifty" : "Bank Nifty"} ${position.right === "CE" ? "call" : "put"} option bought.`,
             body: `Premium ${px(position.premiumEntry)} · stop ${px(position.premiumStop)} · target ${px(position.premiumTarget)} · ${position.premiumSource === "chain" ? "chain LTP" : "modeled estimate"}`,
           });
         }
@@ -199,6 +202,7 @@ export function OptionsDesk(props: Props) {
           kind: "close",
           sound: soundForClose(trade.reason, trade.pnl),
           title: `${name} ${trade.right} ${px(trade.strike)} closed · ${trade.reason}`,
+          spoken: `${name} ${trade.right === "CE" ? "call" : "put"} option closed, ${trade.pnl >= 0 ? "profit" : "loss"}.`,
           body: `Exit premium ${px(trade.premiumExit)} from ${px(trade.premiumEntry)}. ${signedPx(trade.points)} pts, ${inr(trade.pnl)}.`,
         });
       }
@@ -206,6 +210,7 @@ export function OptionsDesk(props: Props) {
     if (seen.current && events.length > 0) {
       setNotices((current) => [...events, ...current].slice(0, 4));
       for (const event of events) playTradeSound(event.sound);
+      for (const event of events) announce(event.spoken);
       for (const event of events) {
         window.setTimeout(() => {
           setNotices((current) => current.filter((n) => n.id !== event.id));
